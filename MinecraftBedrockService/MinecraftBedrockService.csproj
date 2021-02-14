@@ -9,7 +9,7 @@
     <Company />
     <Product>Minecraft Bedrock Server</Product>
     <Description>Minecraft Bedrock Server Windows Service Wrapper</Description>
-    <PackageProjectUrl>https://github.io</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/kwilliams1987/minecraft-bedrock-service</PackageProjectUrl>
   </PropertyGroup>
 
   <ItemGroup>

@@ -5,12 +5,13 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 using System;
 using System.Diagnostics;
-using System.IO;
+using System.Diagnostics.CodeAnalysis;
 using System.ServiceProcess;
 using System.Threading;
 
 namespace MinecraftBedrockService
 {
+    [SuppressMessage("Interoperability", "CA1416:Validate platform compatibility", Justification = "App is only designed for Windows platform.")]
     internal class ServerWrapper : ServiceBase
     {
         private readonly IConfiguration configuration;
@@ -61,36 +62,41 @@ namespace MinecraftBedrockService
             permissionsWatcher.RegisterChangeCallback(PermissionsChangedCallback, null);
         }
 
-        private void ConfigWatcher_Changed(object sender, FileSystemEventArgs e)
-        {
-            throw new NotImplementedException();
-        }
-
         public void Start()
         {
             Running = true;
 
             logger.LogInformation("Starting service wrapper.");
-            var serverConfig = configuration.Get<ServerConfig>() ?? new ServerConfig();
+            var serverConfig = configuration.Get<ServiceConfig>() ?? new ServiceConfig();
             var serverExecutable = fileProvider.GetFileInfo(serverConfig.Executable);
 
-            if (!serverExecutable.Exists)
+            if (serverExecutable.Exists)
             {
-                logger.LogError("Could not find the {0} executable.", serverConfig.Executable);
-                Stop();
-                return;
+                ServerProcess = new Process()
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        CreateNoWindow = true,
+                        FileName = serverExecutable.PhysicalPath,
+                        RedirectStandardError = true,
+                        RedirectStandardInput = true,
+                        RedirectStandardOutput = true,
+                        UseShellExecute = false,
+                        WindowStyle = ProcessWindowStyle.Hidden
+                    }
+                };
+
+                ServerProcess.OutputDataReceived += ServerProcess_OutputDataReceived;
+                ServerProcess.ErrorDataReceived += ServerProcess_ErrorDataReceived;
+
+                ServerProcess.Start();
+                ServerProcess.BeginOutputReadLine();
             }
-
-            ServerProcess = Process.Start(new ProcessStartInfo
+            else
             {
-                FileName = serverExecutable.PhysicalPath,
-                RedirectStandardError = false,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = false                
-            });
-
-            ServerProcess.OutputDataReceived += ServerProcess_OutputDataReceived;
-            ServerProcess.ErrorDataReceived += ServerProcess_ErrorDataReceived;
+                logger.LogError("Could not find the {0} executable in working directory {1}.", serverConfig.Executable, serverConfig.WorkingDirectory);
+                Stop();
+            }
         }
 
         private void ServerProcess_OutputDataReceived(object sender, DataReceivedEventArgs e)

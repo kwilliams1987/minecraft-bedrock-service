@@ -5,24 +5,25 @@ using Microsoft.Extensions.Logging;
 using Serilog;
 using System;
 using System.Diagnostics;
-using System.IO;
+using System.Diagnostics.CodeAnalysis;
 using System.ServiceProcess;
-using System.Threading;
 
 namespace MinecraftBedrockService
 {
+    [SuppressMessage("Interoperability", "CA1416:Validate platform compatibility", Justification = "App is only designed for Windows platform.")]
     class Program
     {
         static void Main(string[] args)
         {
-            var fileProvider = new PhysicalFileProvider(Directory.GetCurrentDirectory());
             var configuration = new ConfigurationBuilder()
                 .AddCommandLine(args)
-                .AddJsonFile(fileProvider, "settings.json", true, false)
                 .Build();
 
+            var serviceConfig = configuration.Get<ServiceConfig>() ?? new ServiceConfig();
+
+            var fileProvider = new PhysicalFileProvider(serviceConfig.WorkingDirectory);
             var loggerConfiguration = new LoggerConfiguration()
-                .WriteTo.File(fileProvider.GetFileInfo("server_wrapper.log").PhysicalPath);
+                .WriteTo.File(fileProvider.GetFileInfo(serviceConfig.LogFileName).PhysicalPath);
 
             if (Environment.UserInteractive)
             {

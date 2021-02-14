@@ -1,10 +1,10 @@
-﻿using System.IO;
+﻿using System;
 
 namespace MinecraftBedrockService
 {
     internal class ServiceConfig
     {
-        public string WorkingDirectory { get; set; } = Directory.GetCurrentDirectory();
+        public string WorkingDirectory { get; set; } = AppDomain.CurrentDomain.BaseDirectory;
         public string Executable { get; set; } = "bedrock_server.exe";
         public string LogFileName { get; set; } = "bedrock_service.log";
     }

@@ -1,12 +1,15 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.Logging;
 using Serilog;
 using System;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Management;
 using System.ServiceProcess;
+using System.Threading;
 
 namespace MinecraftBedrockService
 {
@@ -15,6 +18,7 @@ namespace MinecraftBedrockService
     {
         static void Main(string[] args)
         {
+            var runningAsService = WindowsServiceHelpers.IsWindowsService();
             var configuration = new ConfigurationBuilder()
                 .AddCommandLine(args)
                 .Build();
@@ -25,7 +29,11 @@ namespace MinecraftBedrockService
             var loggerConfiguration = new LoggerConfiguration()
                 .WriteTo.File(fileProvider.GetFileInfo(serviceConfig.LogFileName).PhysicalPath);
 
-            if (Environment.UserInteractive)
+            if (runningAsService)
+            {
+                loggerConfiguration.WriteTo.EventLog(GetServiceName());
+            }
+            else
             {
                 loggerConfiguration.WriteTo.Console();
             }
@@ -41,31 +49,56 @@ namespace MinecraftBedrockService
                     .AddSingleton<IFileProvider>(fileProvider)
                     .BuildServiceProvider();
 
+            var logger = services.GetService<ILogger<Program>>();
+
+            logger.LogInformation("Creating service wrapper...");
             var serverWrapper = new ServerWrapper(services);
 
-            if (Environment.UserInteractive)
+            if (runningAsService)
             {
-                var logger = services.GetService<ILogger<Program>>();
+                logger.LogInformation("Starting wrapper in {0} mode.", "service");
+                ServiceBase.Run(serverWrapper);
+            }
+            else
+            {
+                logger.LogInformation("Starting wrapper in {0} mode.", "console");
 
-                logger.LogInformation("Starting wrapper in console mode.");
-                serverWrapper.Start();
-                if (serverWrapper.Running)
+                new Thread(serverWrapper.Start).Start();
+                new Thread(_ =>
                 {
-                    logger.LogInformation("Server running, press X to terminate.");
-
                     var key = new ConsoleKeyInfo();
+                    logger.LogInformation("Press CTRL + X to exit gracefully.");
+                    logger.LogWarning("Press CTRL + C to terminate.");
                     while (key.Modifiers != ConsoleModifiers.Control || key.Key != ConsoleKey.X)
                     {
                         key = Console.ReadKey(true);
                     }
 
                     serverWrapper.Stop();
-                }
+                }).Start();
             }
-            else
+
+            serverWrapper.WaitForExit();
+            logger.LogInformation("Shutting down.");
+        }
+
+        protected static string GetServiceName()
+        {
+            // Calling System.ServiceProcess.ServiceBase::ServiceNamea allways returns
+            // an empty string,
+            // see https://connect.microsoft.com/VisualStudio/feedback/ViewFeedback.aspx?FeedbackID=387024
+
+            // So we have to do some more work to find out our service name, this only works if
+            // the process contains a single service, if there are more than one services hosted
+            // in the process you will have to do something else
+            
+            var searcher = new ManagementObjectSearcher($"SELECT * FROM Win32_Service where ProcessId = {Environment.ProcessId}");
+            foreach (var result in searcher.Get())
             {
-                ServiceBase.Run(new ServerWrapper(services));
+                return result["Name"].ToString();
             }
+
+            return string.Empty;
         }
     }
 }

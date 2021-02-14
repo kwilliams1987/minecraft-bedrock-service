@@ -17,6 +17,7 @@ namespace MinecraftBedrockService
         private readonly IConfiguration configuration;
         private readonly IFileProvider fileProvider;
         private readonly ILogger logger;
+        private readonly ManualResetEventSlim resetEvent;
 
         private Process ServerProcess;
 
@@ -36,6 +37,7 @@ namespace MinecraftBedrockService
             configuration = services.GetRequiredService<IConfiguration>();
             fileProvider = services.GetRequiredService<IFileProvider>();
             logger = services.GetRequiredService<ILogger<ServerWrapper>>();
+            resetEvent = new ManualResetEventSlim();
 
             whitelistWatcher = fileProvider.Watch("whitelist.json");
             whitelistWatcher.RegisterChangeCallback(WhitelistChangedCallback, null);
@@ -99,6 +101,8 @@ namespace MinecraftBedrockService
             }
         }
 
+        public void WaitForExit() => resetEvent.Wait();
+
         private void ServerProcess_OutputDataReceived(object sender, DataReceivedEventArgs e)
         {
             if (!string.IsNullOrWhiteSpace(e.Data))
@@ -123,11 +127,13 @@ namespace MinecraftBedrockService
         {
             if (ServerProcess != null && !ServerProcess.HasExited)
             {
+                logger.LogInformation("Sending stop command to server.");
                 ServerProcess.StandardInput.WriteLine("stop");
                 ServerProcess.WaitForExit();
             }
 
             Running = false;
+            resetEvent.Set();
         }
     }
 }

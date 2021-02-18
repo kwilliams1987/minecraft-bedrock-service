@@ -1,8 +1,0 @@
-{
-  "profiles": {
-    "MinecraftBedrockService": {
-      "commandName": "Project",
-      "commandLineArgs": "--workingDirectory \"C:\\Minecraft Bedrock\""
-    }
-  }
-}

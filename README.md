@@ -10,6 +10,7 @@ This project allows the `bedrock_server.exe` file to run safely as a background 
 - Automatically restart the server when `server.properties` is modified.
 - Automatically restart the server if it is unexpectedly killed.
 - Shutdown and restart include 30 sec (15 on Windows Shutdown) grace periods with server announcements.
+  - System can detect if players are online and skips grace period if there are none.
 - Server output is saved to disk as `bedrock_service.log`.
 - `bedrock_service.exe` can also be run as a console application for troubleshooting purposes.
 

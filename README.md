@@ -4,9 +4,11 @@ This project allows the `bedrock_server.exe` file to run safely as a background 
 
 ## Features
 
-- Safe handling of Shutdown and Stop conditions by telling server to safely exit with the `stop` command.
+- Safe handling of Shutdown and Stop conditions by passing the`stop` command to the service and waiting for it to quit.
 - Automatically call `whitelist reload` when `whitelist.json` is modified.
 - Automatically call `permission reload` when `permissions.json` is modified.
+- Automatically restart the server when `server.properties` is modified.
+- Shutdown and restart include 30 sec (15 on Windows Shutdown) grace periods with server announcements.
 - Server output is saved to disk as `bedrock_service.log`.
 - `bedrock_service.exe` can also be run as a console application for troubleshooting purposes.
 

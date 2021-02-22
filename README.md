@@ -20,9 +20,12 @@ This project allows the `bedrock_server.exe` file to run safely as a background 
 2. Start `bedrock_service.exe` for testing.
    If `bedrock_service.exe` is not in the same directory as `bedrock_server.exe` pass the `--workingDirectory "directory\containing\bedrock_server"` parameter.
 3. Exit test mode with `CTRL + X`.
-3. Create a new Windows Service entry:
+4. Create a new Windows Service entry:
 
-   `.\sc.exe create MinecraftBedrockServer binPath= "path\to\bedrock_service.exe --workingDirectory \"directory\containing\bedrock_server\"" start= delayed-auto DispayName= "Minecraft Bedrock Dedicated Server" `
+   `.\sc.exe create MinecraftBedrockServer binPath= "path\to\bedrock_service.exe" start= delayed-auto DispayName= "Minecraft Bedrock Dedicated Server" `
+   
+5. Edit the _Start parameters_ to change any default settings.
+6. Start the service and check log file for any issues.
 
 ## Parameters
 

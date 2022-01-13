@@ -4,7 +4,7 @@ This project allows the `bedrock_server.exe` file to run safely as a background 
 
 ## Features
 
-- Safe handling of Shutdown and Stop conditions by passing the`stop` command to the service and waiting for it to quit.
+- Safe handling of Shutdown and Stop conditions by passing the `stop` command to the service and waiting for it to quit.
 - Automatically call `whitelist reload` when `whitelist.json` is modified.
 - Automatically call `permission reload` when `permissions.json` is modified.
 - Automatically restart the server when `server.properties` is modified.

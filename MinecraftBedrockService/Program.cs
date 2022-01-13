@@ -3,17 +3,17 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.Logging;
+using MinecraftBedrockService.Interfaces;
 using Serilog;
 using System;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Management;
 using System.ServiceProcess;
 using System.Threading;
 
 namespace MinecraftBedrockService
 {
-    [SuppressMessage("Interoperability", "CA1416:Validate platform compatibility", Justification = "App is only designed for Windows platform.")]
     class Program
     {
         static void Main(string[] args)
@@ -27,7 +27,7 @@ namespace MinecraftBedrockService
 
             var fileProvider = new PhysicalFileProvider(serviceConfig.WorkingDirectory);
             var loggerConfiguration = new LoggerConfiguration()
-                .WriteTo.File(fileProvider.GetFileInfo(serviceConfig.LogFileName).PhysicalPath);
+                .WriteTo.File(Path.Combine(serviceConfig.WorkingDirectory, serviceConfig.LogFileName));
 
             if (runningAsService)
             {
@@ -44,37 +44,64 @@ namespace MinecraftBedrockService
             }
 
             var services = new ServiceCollection()
+                    .AddOptions<ServiceConfig>().Bind(configuration).Services
                     .AddLogging(l => l.AddSerilog(loggerConfiguration.CreateLogger(), true))
                     .AddSingleton<IConfiguration>(configuration)
                     .AddSingleton<IFileProvider>(fileProvider)
+                    .AddSingleton<IServerManager, ServerManager>()
+                    .AddSingleton<IBackupManager, BackupManager>()
+                    .AddSingleton<IConfigurationWatcher, ConfigurationWatcher>()
+                    .AddSingleton<BackgroundService>()
                     .BuildServiceProvider();
 
             var logger = services.GetService<ILogger<Program>>();
 
             logger.LogInformation("Creating service wrapper...");
-            var serverWrapper = new ServerWrapper(services);
+            var serverWrapper = services.GetService<BackgroundService>();
+            var backupManager = services.GetService<IBackupManager>();
 
             if (runningAsService)
             {
-                logger.LogInformation("Starting wrapper in {0} mode.", "service");
+                logger.LogInformation("Starting wrapper in {modeType} mode.", "service");
                 ServiceBase.Run(serverWrapper);
             }
             else
             {
-                logger.LogInformation("Starting wrapper in {0} mode.", "console");
+                logger.LogInformation("Starting wrapper in {modeType} mode.", "console");
 
                 new Thread(serverWrapper.Start).Start();
                 new Thread(_ =>
                 {
                     var key = new ConsoleKeyInfo();
                     logger.LogInformation("Press CTRL + X to exit gracefully.");
+                    logger.LogInformation("Press CTRL + B to force a backup, CTRL + N to cancel a backup.");
                     logger.LogWarning("Press CTRL + C to terminate.");
-                    while (key.Modifiers != ConsoleModifiers.Control || key.Key != ConsoleKey.X)
+
+                    while (true)
                     {
                         key = Console.ReadKey(true);
+                        if (key.Modifiers != ConsoleModifiers.Control)
+                        {
+                            continue;
+                        }
+
+                        if (key.Key == ConsoleKey.B)
+                        {
+                            backupManager.CreateBackupAsync();
+                        }
+
+                        if (key.Key == ConsoleKey.N)
+                        {
+                            backupManager.CancelBackupAsync();
+                        }
+
+                        if (key.Key == ConsoleKey.X) 
+                        {
+                            serverWrapper.Stop();
+                            break;
+                        }
                     }
 
-                    serverWrapper.Stop();
                 }).Start();
             }
 

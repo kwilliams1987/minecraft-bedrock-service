@@ -24,6 +24,8 @@ namespace MinecraftBedrockService
         private IChangeToken permissionsWatcher;
         private IChangeToken propertiesWatcher;
 
+        public bool IsRunning => !_exitGate.IsSet;
+
         public BackgroundService(IOptions<ServiceConfig> configuration, IFileProvider fileProvider, ILogger<BackgroundService> logger, IServerManager serverManager, IBackupManager backupManager)
         {
             CanHandlePowerEvent = false;

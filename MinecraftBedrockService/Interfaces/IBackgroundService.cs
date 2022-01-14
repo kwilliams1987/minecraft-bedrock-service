@@ -4,5 +4,6 @@
     {
         void Start();
         void WaitForExit();
+        bool IsRunning { get; }
     }
 }

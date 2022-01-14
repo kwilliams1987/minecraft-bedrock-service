@@ -9,6 +9,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Management;
+using System.Runtime.InteropServices;
 using System.ServiceProcess;
 using System.Threading;
 
@@ -77,28 +78,35 @@ namespace MinecraftBedrockService
                     logger.LogInformation("Press CTRL + B to force a backup, CTRL + N to cancel a backup.");
                     logger.LogWarning("Press CTRL + C to terminate.");
 
-                    while (true)
+                    while (serverWrapper.IsRunning)
                     {
-                        key = Console.ReadKey(true);
-                        if (key.Modifiers != ConsoleModifiers.Control)
+                        try
                         {
-                            continue;
-                        }
+                            key = Console.ReadKey(true);
+                            if (key.Modifiers != ConsoleModifiers.Control)
+                            {
+                                continue;
+                            }
 
-                        if (key.Key == ConsoleKey.B)
-                        {
-                            backupManager.CreateBackupAsync();
-                        }
+                            if (key.Key == ConsoleKey.B)
+                            {
+                                backupManager.CreateBackupAsync();
+                            }
 
-                        if (key.Key == ConsoleKey.N)
-                        {
-                            backupManager.CancelBackupAsync();
-                        }
+                            if (key.Key == ConsoleKey.N)
+                            {
+                                backupManager.CancelBackupAsync();
+                            }
 
-                        if (key.Key == ConsoleKey.X) 
+                            if (key.Key == ConsoleKey.X)
+                            {
+                                serverWrapper.Stop();
+                                break;
+                            }
+                        }
+                        catch (InvalidOperationException ex)
                         {
-                            serverWrapper.Stop();
-                            break;
+                            logger.LogTrace(ex, "Input wait was interupted.");
                         }
                     }
 
@@ -106,6 +114,13 @@ namespace MinecraftBedrockService
             }
 
             serverWrapper.WaitForExit();
+
+            if (!runningAsService)
+            {
+                var handle = GetStdHandle(STD_INPUT_HANDLE);
+                CancelIoEx(handle, IntPtr.Zero);
+            }
+
             logger.LogInformation("Shutting down.");
         }
 
@@ -127,5 +142,14 @@ namespace MinecraftBedrockService
 
             return string.Empty;
         }
+
+        const int STD_INPUT_HANDLE = -10;
+        const int STD_INPUT_CANCEL = -2146233079;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr GetStdHandle(int nStdHandle);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool CancelIoEx(IntPtr handle, IntPtr lpOverlapped);
     }
 }

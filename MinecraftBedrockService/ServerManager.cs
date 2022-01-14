@@ -1,10 +1,11 @@
-﻿using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.FileProviders;
+﻿using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MinecraftBedrockService.Interfaces;
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -23,7 +24,6 @@ namespace MinecraftBedrockService
 
         private Process serverProcess;
         private int playerCount = 0;
-        private int processId = 0;
 
         public bool ServerIsRunning => serverProcess != null && serverProcess.HasExited == false;
         public bool ExitRequested { get; private set; } = false;
@@ -64,80 +64,61 @@ namespace MinecraftBedrockService
             }
 
             var serverExecutable = _workingDirectory.GetFileInfo(_configuration.Value.Executable);
-
-            if (processId != 0)
+            serverProcess = Process.GetProcesses().FirstOrDefault(p =>
             {
-                _logger.LogWarning("Checking for previous server process with ID {processId}.", processId);
-
                 try
                 {
-                    serverProcess = Process.GetProcessById(processId);
-
-                    if (serverProcess.MainModule.FileName == serverExecutable.PhysicalPath)
-                    {
-                        serverProcess.OutputDataReceived += ServerProcess_OutputDataReceived;
-                        serverProcess.ErrorDataReceived += ServerProcess_ErrorDataReceived;
-
-                        _startGate.Reset();
-                        _logger.LogInformation("Reconnected to {path}.", serverProcess.MainModule.FileName);
-
-                        _logger.LogInformation("Hooking console output.");
-                        serverProcess.BeginOutputReadLine();
-
-                        StartServerHeartbeat();
-                        return Task.FromResult(true);
-                    }
-                    else
-                    {
-                        _logger.LogInformation("Unable to reconnect to previous server process.");
-                        processId = 0;
-                    }
+                    return p.MainModule.FileName == serverExecutable.PhysicalPath;
                 }
-                catch
+                catch (Win32Exception)
                 {
-                    _logger.LogInformation("Unable to reconnect to previous server process.");
-                    processId = 0;
+                    return false;
                 }
+            });
+
+            if (serverProcess != null)
+            {
+                _logger.LogError("A server process with ID {processId} was already found for this instance. The server manager cannot continue.", serverProcess.Id);
+
+                serverProcess = null;
+                return Task.FromResult(false);
             }
-
-            _startGate.Reset();
-
             if (serverExecutable.Exists)
             {
-                serverProcess = new Process()
-                {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        CreateNoWindow = true,
-                        FileName = serverExecutable.PhysicalPath,
-                        RedirectStandardError = true,
-                        RedirectStandardInput = true,
-                        RedirectStandardOutput = true,
-                        UseShellExecute = false,
-                        WindowStyle = ProcessWindowStyle.Hidden
-                    }
-                };
-
                 try
                 {
+                    serverProcess = new Process()
+                    {
+                        StartInfo = new ProcessStartInfo
+                        {
+                            CreateNoWindow = true,
+                            FileName = serverExecutable.PhysicalPath,
+                            RedirectStandardError = true,
+                            RedirectStandardInput = true,
+                            RedirectStandardOutput = true,
+                            UseShellExecute = false,
+                            WindowStyle = ProcessWindowStyle.Hidden
+                        }
+                    };
+
                     serverProcess.OutputDataReceived += ServerProcess_OutputDataReceived;
                     serverProcess.ErrorDataReceived += ServerProcess_ErrorDataReceived;
-
-                    _startGate.Reset();
                     _logger.LogInformation("Starting {path}.", serverExecutable.PhysicalPath);
                     serverProcess.Start();
-                    processId = serverProcess.Id;
 
-                    _logger.LogInformation("Hooking console output for Process ID {processId}.", processId);
+                    _startGate.Reset();
+                    _logger.LogInformation("Hooking console output for Process ID {processId}.", serverProcess.Id);
                     serverProcess.BeginOutputReadLine();
+                    serverProcess.BeginErrorReadLine();
 
                     StartServerHeartbeat();
+
                     return Task.FromResult(true);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to start the server.");
-                    serverProcess.Kill();
+                    serverProcess?.Kill();
 
                     return Task.FromResult(false);
                 }
@@ -170,7 +151,6 @@ namespace MinecraftBedrockService
                     }
                 }
 
-                processId = 0;
                 return true;
             }
             catch (Exception ex)
@@ -200,7 +180,6 @@ namespace MinecraftBedrockService
             catch (OperationCanceledException) { }
         }
         
-
         private void StartServerHeartbeat() => new Thread(async _ =>
         {
             await serverProcess?.WaitForExitAsync();

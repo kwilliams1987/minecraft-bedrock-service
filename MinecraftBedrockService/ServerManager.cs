@@ -83,6 +83,7 @@ namespace MinecraftBedrockService
                 serverProcess = null;
                 return Task.FromResult(false);
             }
+
             if (serverExecutable.Exists)
             {
                 try

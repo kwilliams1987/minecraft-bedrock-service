@@ -9,7 +9,6 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Management;
-using System.Runtime.InteropServices;
 using System.ServiceProcess;
 using System.Threading;
 
@@ -58,75 +57,72 @@ namespace MinecraftBedrockService
             var logger = services.GetService<ILogger<Program>>();
 
             logger.LogInformation("Creating service wrapper...");
-            var serverWrapper = services.GetService<BackgroundService>();
+            var backgroundService = services.GetService<BackgroundService>();
             var backupManager = services.GetService<IBackupManager>();
 
             if (runningAsService)
             {
                 logger.LogInformation("Starting wrapper in {modeType} mode.", "service");
-                ServiceBase.Run(serverWrapper);
+                ServiceBase.Run(backgroundService);
             }
             else
             {
                 logger.LogInformation("Starting wrapper in {modeType} mode.", "console");
 
-                new Thread(serverWrapper.Start).Start();
+                new Thread(backgroundService.Start).Start();
                 new Thread(_ =>
                 {
+                    var spinWait = new SpinWait();
                     var key = new ConsoleKeyInfo();
                     logger.LogInformation("Press CTRL + X to exit gracefully.");
                     logger.LogInformation("Press CTRL + B to force a backup, CTRL + N to cancel a backup.");
                     logger.LogWarning("Press CTRL + C to terminate.");
 
-                    while (serverWrapper.IsRunning)
+                    while (backgroundService.IsRunning)
                     {
                         try
                         {
-                            key = Console.ReadKey(true);
-                            if (key.Modifiers != ConsoleModifiers.Control)
+                            if (Console.KeyAvailable)
                             {
-                                continue;
-                            }
+                                key = Console.ReadKey(true);
+                                if (key.Modifiers == ConsoleModifiers.Control)
+                                {
+                                    if (key.Key == ConsoleKey.B)
+                                    {
+                                        backupManager.CreateBackupAsync();
+                                    }
 
-                            if (key.Key == ConsoleKey.B)
-                            {
-                                backupManager.CreateBackupAsync();
-                            }
+                                    if (key.Key == ConsoleKey.N)
+                                    {
+                                        backupManager.CancelBackupAsync();
+                                    }
 
-                            if (key.Key == ConsoleKey.N)
-                            {
-                                backupManager.CancelBackupAsync();
-                            }
-
-                            if (key.Key == ConsoleKey.X)
-                            {
-                                serverWrapper.Stop();
-                                break;
+                                    if (key.Key == ConsoleKey.X)
+                                    {
+                                        backgroundService.Stop();
+                                        break;
+                                    }
+                                }                                
                             }
                         }
                         catch (InvalidOperationException ex)
                         {
                             logger.LogTrace(ex, "Input wait was interupted.");
                         }
-                    }
 
+                        Thread.MemoryBarrier();
+                        spinWait.SpinOnce();
+                    }
                 }).Start();
             }
 
-            serverWrapper.WaitForExit();
-
-            if (!runningAsService)
-            {
-                var handle = GetStdHandle(STD_INPUT_HANDLE);
-                CancelIoEx(handle, IntPtr.Zero);
-            }
-
+            backgroundService.WaitForExit();
             logger.LogInformation("Shutting down.");
         }
 
         protected static string GetServiceName()
         {
-            // Calling System.ServiceProcess.ServiceBase::ServiceNamea allways returns
+            // Calling System.ServiceProcess.ServiceBase::ServiceNamea always returns
             // an empty string,
             // see https://connect.microsoft.com/VisualStudio/feedback/ViewFeedback.aspx?FeedbackID=387024
 
@@ -142,14 +138,5 @@ namespace MinecraftBedrockService
 
             return string.Empty;
         }
-
-        const int STD_INPUT_HANDLE = -10;
-        const int STD_INPUT_CANCEL = -2146233079;
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        static extern IntPtr GetStdHandle(int nStdHandle);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        static extern bool CancelIoEx(IntPtr handle, IntPtr lpOverlapped);
     }
 }

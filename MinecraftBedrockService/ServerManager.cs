@@ -19,9 +19,6 @@ namespace MinecraftBedrockService
         private readonly IFileProvider _workingDirectory;
         private readonly ILogger _logger;
 
-        private readonly ManualResetEventSlim _serverGate = new();
-        private readonly ManualResetEventSlim _startGate = new();
-
         private Process serverProcess;
         private int playerCount = 0;
 
@@ -74,6 +71,10 @@ namespace MinecraftBedrockService
                 {
                     return false;
                 }
+                catch (InvalidOperationException)
+                {
+                    return false;
+                }
             });
 
             if (serverProcess != null)
@@ -92,13 +93,15 @@ namespace MinecraftBedrockService
                     {
                         StartInfo = new ProcessStartInfo
                         {
+#if !DEBUG
                             CreateNoWindow = true,
+                            WindowStyle = ProcessWindowStyle.Hidden,
+#endif
                             FileName = serverExecutable.PhysicalPath,
                             RedirectStandardError = true,
                             RedirectStandardInput = true,
                             RedirectStandardOutput = true,
-                            UseShellExecute = false,
-                            WindowStyle = ProcessWindowStyle.Hidden
+                            UseShellExecute = false
                         }
                     };
 
@@ -107,7 +110,6 @@ namespace MinecraftBedrockService
                     _logger.LogInformation("Starting {path}.", serverExecutable.PhysicalPath);
                     serverProcess.Start();
 
-                    _startGate.Reset();
                     _logger.LogInformation("Hooking console output for Process ID {processId}.", serverProcess.Id);
                     serverProcess.BeginOutputReadLine();
                     serverProcess.BeginErrorReadLine();
@@ -166,21 +168,11 @@ namespace MinecraftBedrockService
                 Interlocked.Exchange(ref playerCount, 0);
                 serverProcess?.Dispose();
                 serverProcess = null;
-                _serverGate.Set();
             }
         }
 
         public Task<int> GetPlayerCountAsync() => Task.FromResult(playerCount);
 
-        public void WaitForStart(CancellationToken? cancellationToken = null)
-        {
-            try
-            {
-                _startGate.Wait(cancellationToken ?? CancellationToken.None);
-            }
-            catch (OperationCanceledException) { }
-        }
-        
         private void StartServerHeartbeat() => new Thread(async _ =>
         {
             await serverProcess?.WaitForExitAsync();
@@ -218,7 +210,6 @@ namespace MinecraftBedrockService
 
                 else if (message.EndsWith("Server started."))
                 {
-                    _startGate.Set();
                     _logger.LogTrace("{message}", message);
                 }
 

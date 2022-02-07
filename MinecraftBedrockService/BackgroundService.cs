@@ -83,7 +83,7 @@ namespace MinecraftBedrockService
         {
             Task.Run(async () =>
             {
-                await SendShutdownMessage(messageTemplate, checkpointSeconds);
+                await SendTimedMessageAsync(messageTemplate, checkpointSeconds);
 
                 await _backupManager.StopWatchingAsync();
                 await _backupManager.CancelBackupAsync();
@@ -95,7 +95,7 @@ namespace MinecraftBedrockService
             _exitGate.Wait();
         }
 
-        private async Task SendShutdownMessage(string messageTemplate, params int[] checkpointSeconds)
+        private async Task SendTimedMessageAsync(string messageTemplate, params int[] checkpointSeconds)
         {
             if (await _serverManager.GetPlayerCountAsync() > 0 && checkpointSeconds.Any())
             {
@@ -145,7 +145,7 @@ namespace MinecraftBedrockService
         {
             _logger.LogInformation("Server properties changed, triggering server restart.");
 
-            await SendShutdownMessage("Server restart in {0}.", 30, 20, 10, 5, 3, 2, 1);
+            await SendTimedMessageAsync("Server restart in {0}.", 30, 20, 10, 5, 3, 2, 1);
             await SendServerMessage("Restarting server now.");
 
             await _serverManager.StopServerAsync();

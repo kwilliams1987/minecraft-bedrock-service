@@ -15,6 +15,5 @@ namespace MinecraftBedrockService.Interfaces
         Task<bool> StopServerAsync(TimeSpan? maxWaitTime = null);
         Task SendServerCommandAsync(string command);
         Task<int> GetPlayerCountAsync();
-        void WaitForStart(CancellationToken? cancellationToken = null);
     }
 }

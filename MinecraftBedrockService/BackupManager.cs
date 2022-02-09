@@ -1,8 +1,7 @@
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.FileProviders;
+﻿using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using MinecraftBedrockService.Configuration;
 using MinecraftBedrockService.Interfaces;
 using System;
 using System.Collections.Generic;
@@ -18,7 +17,7 @@ namespace MinecraftBedrockService
     {
         private static readonly TimeSpan ProgressGateDelay = TimeSpan.FromMilliseconds(1500);
 
-        private readonly IOptions<ServiceConfig> _configuration;
+        private readonly IOptions<ServerConfig> _configuration;
         private readonly ILogger _logger;
         private readonly IServerManager _serverManager;
         private readonly IFileProvider _workingDirectory;
@@ -27,7 +26,7 @@ namespace MinecraftBedrockService
         private CancellationTokenSource backupCancellationToken;
         private CancellationTokenSource watcherCancellationToken;
 
-        public BackupManager(ILogger<BackupManager> logger, IServerManager serverManager, IFileProvider fileProvider, IOptions<ServiceConfig> configuration)
+        public BackupManager(ILogger<BackupManager> logger, IServerManager serverManager, IFileProvider fileProvider, IOptions<ServerConfig> configuration)
         {
             _logger = logger;
             _serverManager = serverManager;
@@ -40,33 +39,6 @@ namespace MinecraftBedrockService
             var backupFiles = new Dictionary<string, int>();
             var backupProgressGate = new ManualResetEventSlim();
             var temporaryFolder = Path.Combine(Path.GetTempPath(), Path.GetTempFileName());
-
-            void OnDataRecieved(object sender, string message)
-            {
-                if (message?.Contains("/db/MANIFEST") == true)
-                {
-                    var files = message?.Split(", ").Select(f => f.Split(':'));
-                    foreach (var file in files)
-                    {
-                        var newLength = int.Parse(file[1]);
-
-                        if (backupFiles.ContainsKey(file[0]))
-                        {
-                            if (backupFiles[file[0]] != newLength)
-                            {
-                                _logger.LogWarning("File {file} was already found in file collection with length of {oldLength}. Replacing with {newLength}.", file[0], backupFiles[file[0]], newLength);
-                                backupFiles[file[0]] = newLength;
-                            }
-                        }
-                        else 
-                        { 
-                            backupFiles.Add(file[0], newLength);
-                        }
-                    }
-
-                    backupProgressGate.Set();
-                }
-            }
 
             if (backupCancellationToken != null)
             {
@@ -98,7 +70,35 @@ namespace MinecraftBedrockService
                 _logger.LogInformation("Starting backup.");
                 var backupPath = $"{Path.Combine(_configuration.Value.WorkingDirectory, _configuration.Value.BackupDirectory, DateTime.Now.ToString("yyyy-MM-dd HH.mm.ss"))}.zip";
 
-                _serverManager.MessageReceived += OnDataRecieved;
+                var subscription = _serverManager.Subscribe(new OutputObserver(message =>
+                {
+                    if (message?.Contains("/db/MANIFEST") == true)
+                    {
+                        backupProgressGate.Set();
+
+                        var files = message?.Split(", ").Select(f => f.Split(':'));
+                        foreach (var file in files)
+                        {
+                            var newLength = int.Parse(file[1]);
+
+                            if (backupFiles.ContainsKey(file[0]))
+                            {
+                                if (backupFiles[file[0]] != newLength)
+                                {
+                                    _logger.LogWarning("File {file} was already found in file collection with length of {oldLength}. Replacing with {newLength}.", file[0], backupFiles[file[0]], newLength);
+                                    backupFiles[file[0]] = newLength;
+                                }
+                            }
+                            else
+                            {
+                                backupFiles.Add(file[0], newLength);
+                            }
+                        }
+
+                        backupProgressGate.Set();
+                    }
+                }));
+
                 try
                 {
                     backupFiles.Clear();
@@ -117,7 +117,7 @@ namespace MinecraftBedrockService
                 }
                 finally
                 {
-                    _serverManager.MessageReceived -= OnDataRecieved;
+                    subscription.Dispose();
                 }
 
                 backupProgressGate.WaitOne();

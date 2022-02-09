@@ -1,8 +1,10 @@
 ﻿using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using MinecraftBedrockService.Configuration;
 using MinecraftBedrockService.Interfaces;
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
@@ -13,9 +15,30 @@ namespace MinecraftBedrockService
 {
     internal class ServerManager : IServerManager
     {
-        public event IServerManager.OnMessageReceived MessageReceived;
+        private class ServerManagerObserver: IDisposable
+        {
+            private readonly List<IObserver<string>> _observers;
+            private readonly IObserver<string> _observer;
 
-        private readonly IOptions<ServiceConfig> _configuration;
+            public ServerManagerObserver(List<IObserver<string>> observers, IObserver<string> observer)
+            {
+                _observers = observers ?? throw new ArgumentNullException(nameof(observers));
+                _observer = observer ?? throw new ArgumentNullException(nameof(observer));
+
+                _observers.Add(observer);
+            }
+
+            public void Dispose()
+            {
+                if (_observer != null && _observers.Contains(_observer))
+                {
+                    _observers.Remove(_observer);
+                }
+            }
+        }
+
+        private readonly List<IObserver<string>> _observers = new();
+        private readonly IOptions<ServerConfig> _configuration;
         private readonly IFileProvider _workingDirectory;
         private readonly ILogger _logger;
 
@@ -25,7 +48,7 @@ namespace MinecraftBedrockService
         public bool ServerIsRunning => serverProcess != null && serverProcess.HasExited == false;
         public bool ExitRequested { get; private set; } = false;
 
-        public ServerManager(IOptions<ServiceConfig> configuration, IFileProvider workingDirectory, ILogger<ServerManager> logger)
+        public ServerManager(IOptions<ServerConfig> configuration, IFileProvider workingDirectory, ILogger<ServerManager> logger)
         {
             _configuration = configuration;
             _workingDirectory = workingDirectory;
@@ -217,9 +240,9 @@ namespace MinecraftBedrockService
                 {
                     _logger.Log(e.GetLogLevel(), "{message}", message);
                 }
-            }
 
-            MessageReceived?.Invoke(this, message);
+                OnMessage(message);
+            }
         }
 
         private void ServerProcess_ErrorDataReceived(object sender, DataReceivedEventArgs e)
@@ -229,6 +252,28 @@ namespace MinecraftBedrockService
             if (!string.IsNullOrWhiteSpace(message))
             {
                 _logger.LogCritical("{message}", message);
+            }
+        }
+
+        public IDisposable Subscribe(IObserver<string> observer) => new ServerManagerObserver(_observers, observer);
+
+        private void OnMessage(string message)
+        {
+            if (string.IsNullOrEmpty(message))
+            {
+                var error = new ArgumentNullException(nameof(message));
+
+                foreach (var observer in _observers.ToArray())
+                {
+                    observer.OnError(error);
+                }
+            }
+            else
+            {
+                foreach (var observer in _observers.ToArray())
+                {
+                    observer.OnNext(message);
+                }
             }
         }
     }

@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
+using MinecraftBedrockService.Configuration;
 using MinecraftBedrockService.Interfaces;
 using System;
 using System.Linq;
@@ -13,7 +14,7 @@ namespace MinecraftBedrockService
 {
     internal class BackgroundService : ServiceBase, IBackgroundService
     {
-        private readonly IOptions<ServiceConfig> _configuration;
+        private readonly IOptions<ServerConfig> _configuration;
         private readonly IFileProvider _workingDirectory;
         private readonly ILogger _logger;
         private readonly IServerManager _serverManager;
@@ -26,7 +27,7 @@ namespace MinecraftBedrockService
 
         public bool IsRunning => !_exitGate.IsSet;
 
-        public BackgroundService(IOptions<ServiceConfig> configuration, IFileProvider fileProvider, ILogger<BackgroundService> logger, IServerManager serverManager, IBackupManager backupManager)
+        public BackgroundService(IOptions<ServerConfig> configuration, IFileProvider fileProvider, ILogger<BackgroundService> logger, IServerManager serverManager, IBackupManager backupManager)
         {
             CanHandlePowerEvent = false;
             CanHandleSessionChangeEvent = false;
@@ -117,8 +118,6 @@ namespace MinecraftBedrockService
                 }
             }
         }
-
-        public void WaitForExit() => _exitGate.Wait();
 
         private Task SendServerMessage(string message, params object[] args) => SendServerCommand($"say {string.Format(message, args)}");
         private async Task SendServerCommand(string command) => await _serverManager.SendServerCommandAsync(command);

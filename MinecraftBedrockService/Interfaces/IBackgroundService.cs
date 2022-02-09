@@ -3,7 +3,7 @@
     internal interface IBackgroundService
     {
         void Start();
-        void WaitForExit();
+        void Stop();
         bool IsRunning { get; }
     }
 }

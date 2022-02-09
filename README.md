@@ -25,12 +25,12 @@ This project allows the `bedrock_server.exe` file to run safely as a background 
 
    Example: `.\bedrock_service.exe [--workingDirectory "directory\containing\bedrock_server"] [--executable "bedrock_server.exe"] [--logFileName "bedrock_service.log"] [--backupInterval "00:30:00"] [--backupDirectory "Backups"]`
 
-3. Exit test mode with `CTRL + X`.
+3. Exit test mode with `CTRL + X`.=
 4. Trigger a backup with `CTRL + B`, cancel a running backup with `CTRL + N`.
 5. Create a new Windows Service entry:
 
    `.\bedrock_service.exe --createService true [--workingDirectory "directory\containing\bedrock_server"] [--executable "bedrock_server.exe"] [--logFileName "bedrock_service.log"] [--backupInterval "00:30:00"] [--backupDirectory "Backups"]`
-
+   
 ## Parameters
 
 | Parameter	           | Default Value         | Description                                                              |

@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net5.0</TargetFramework>
+    <TargetFramework>net6.0</TargetFramework>
     <StartupObject>MinecraftBedrockService.Program</StartupObject>
     <AssemblyName>bedrock_service</AssemblyName>
     <Authors>Kristian Anderson-Williams &lt;kristian.andersonwilliams@gmail.com&gt;</Authors>
@@ -10,7 +10,7 @@
     <Product>Minecraft Bedrock Server</Product>
     <Description>Minecraft Bedrock Server Windows Service Wrapper</Description>
     <PackageProjectUrl>https://github.com/kwilliams1987/minecraft-bedrock-service</PackageProjectUrl>
-    <Version>1.0.2</Version>
+    <Version>1.0.3</Version>
   </PropertyGroup>
 
   <ItemGroup>

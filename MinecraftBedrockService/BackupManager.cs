@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
@@ -120,6 +120,8 @@ namespace MinecraftBedrockService
                     _serverManager.MessageReceived -= OnDataRecieved;
                 }
 
+                backupProgressGate.WaitOne();
+
                 foreach (var file in backupFiles)
                 {
                     var source = Path.Combine(_configuration.Value.WorkingDirectory, "worlds", file.Key);
@@ -160,6 +162,7 @@ namespace MinecraftBedrockService
             }
             finally
             {
+                await _serverManager.SendServerCommandAsync("save resume").ConfigureAwait(false);
                 Directory.Delete(temporaryFolder, true);
                 _backupGate.Set();
                 backupCancellationToken = null;
@@ -204,6 +207,10 @@ namespace MinecraftBedrockService
 
                     _logger.LogInformation("Creating new backup.");
                     await CreateBackupAsync();
+                }
+                catch (TaskCanceledException)
+                {
+                    break;
                 }
                 catch (OperationCanceledException) { }
                 catch (Exception ex)

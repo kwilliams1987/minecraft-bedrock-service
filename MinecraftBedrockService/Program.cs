@@ -46,6 +46,7 @@ namespace MinecraftBedrockService
                 return;
             }
 
+            logger.LogInformation("Minecraft Bedrock Service Manager v{version}", typeof(Program).Assembly.GetName().Version);
             logger.LogInformation("Creating service wrapper...");
             var backgroundService = services.GetService<BackgroundService>();
 

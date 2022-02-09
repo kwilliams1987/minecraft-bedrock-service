@@ -22,7 +22,7 @@ namespace Microsoft.Extensions.DependencyInjection
 
             if (WindowsServiceHelpers.IsWindowsService())
             {
-                loggerConfiguration.WriteTo.EventLog(ServiceHelper.GetServiceNameAsync());
+                loggerConfiguration.WriteTo.EventLog(ServiceHelper.GetServiceNameAsync(), restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Warning);
             }
             else
             {

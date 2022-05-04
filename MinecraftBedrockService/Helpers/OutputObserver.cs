@@ -1,17 +1,17 @@
-﻿namespace MinecraftBedrockService;
+﻿namespace MinecraftBedrockService.Helpers;
 
 internal class OutputObserver : IObserver<string>
 {
     private readonly Func<string, Task> _onNextAsync;
-    private readonly Func<Exception, Task> _onExceptionAsync;
+    private readonly Func<Exception, Task>? _onExceptionAsync;
 
-    public OutputObserver(Func<string, Task> onNext, Func<Exception, Task> onException = null)
+    public OutputObserver(Func<string, Task> onNext, Func<Exception, Task>? onException = null)
     {
         _onNextAsync = onNext;
         _onExceptionAsync = onException;
     }
 
-    public OutputObserver(Action<string> onNext, Action<Exception> onException = null)
+    public OutputObserver(Action<string> onNext, Action<Exception>? onException = null)
     {
         _onNextAsync = value =>
         {

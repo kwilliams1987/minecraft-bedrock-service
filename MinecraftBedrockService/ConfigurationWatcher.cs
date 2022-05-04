@@ -1,19 +1,13 @@
 ﻿using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
+using System.Collections.Generic;
 
 namespace MinecraftBedrockService;
 
 public class ConfigurationWatcher : IConfigurationWatcher
 {
-    private const string WhitelistFile = "whitelist.json";
-    private const string PermissionsFile = "permissions.json";
-    private const string ServerPropertiesFile = "server.properties";
-
-    public event IConfigurationWatcher.OnWhitelistChanged WhitelistChanged;
-    public event IConfigurationWatcher.OnPermissionsChanged PermissionsChanged;
-    public event IConfigurationWatcher.OnServerPropertiesChanged ServerPropertiesChanged;
-
+    private readonly List<IObserver<ConfigurationFileType>> _fileObservers = new();
     private readonly IFileProvider _workingDirectory;
     private readonly ILogger _logger;
 
@@ -26,40 +20,42 @@ public class ConfigurationWatcher : IConfigurationWatcher
         _workingDirectory = workingDirectory;
         _logger = logger;
 
-        whitelistWatcher = _workingDirectory.Watch(WhitelistFile);
+        whitelistWatcher = _workingDirectory.Watch(ServerFiles.Whitelist);
         whitelistWatcher.RegisterChangeCallback(WhitelistChangedCallback, null);
 
-        permissionsWatcher = _workingDirectory.Watch(PermissionsFile);
+        permissionsWatcher = _workingDirectory.Watch(ServerFiles.Permissions);
         permissionsWatcher.RegisterChangeCallback(PermissionsChangedCallback, null);
 
-        propertiesWatcher = _workingDirectory.Watch(ServerPropertiesFile);
+        propertiesWatcher = _workingDirectory.Watch(ServerFiles.ServerProperties);
         propertiesWatcher.RegisterChangeCallback(PropertiesChangedCallback, null);
     }
 
+    public IDisposable Subscribe(IObserver<ConfigurationFileType> observer) => new Observer<ConfigurationFileType>(_fileObservers, observer);
+
     private void WhitelistChangedCallback(object state)
     {
-        _logger.LogInformation("{0} file changed.", "Whitelist");
-        WhitelistChanged?.Invoke();
+        _logger.LogInformation(ConfigurationWatcherFileChanged, ServerFiles.Whitelist);
+        _fileObservers.OnNext(ConfigurationFileType.Whitelist);
 
-        whitelistWatcher = _workingDirectory.Watch(WhitelistFile);
+        whitelistWatcher = _workingDirectory.Watch(ServerFiles.Whitelist);
         whitelistWatcher.RegisterChangeCallback(WhitelistChangedCallback, null);
     }
 
     private void PermissionsChangedCallback(object state)
     {
-        _logger.LogInformation("{0} file changed.", "Permissions");
-        PermissionsChanged?.Invoke();
+        _logger.LogInformation(ConfigurationWatcherFileChanged, ServerFiles.Permissions);
+        _fileObservers.OnNext(ConfigurationFileType.Permissions);
 
-        permissionsWatcher = _workingDirectory.Watch(PermissionsFile);
+        permissionsWatcher = _workingDirectory.Watch(ServerFiles.Permissions);
         permissionsWatcher.RegisterChangeCallback(PermissionsChangedCallback, null);
     }
 
     private void PropertiesChangedCallback(object state)
     {
-        _logger.LogInformation("{0} file changed.", "Server Properties");
-        ServerPropertiesChanged?.Invoke();
+        _logger.LogInformation(ConfigurationWatcherFileChanged, ServerFiles.ServerProperties);
+        _fileObservers.OnNext(ConfigurationFileType.ServerProperties);
 
-        propertiesWatcher = _workingDirectory.Watch(ServerPropertiesFile);
+        propertiesWatcher = _workingDirectory.Watch(ServerFiles.ServerProperties);
         propertiesWatcher.RegisterChangeCallback(PropertiesChangedCallback, null);
     }
 }

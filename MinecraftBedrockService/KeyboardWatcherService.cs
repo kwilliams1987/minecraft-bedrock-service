@@ -22,8 +22,8 @@ internal class KeyboardWatcherService: Microsoft.Extensions.Hosting.BackgroundSe
     {
         if (_serverManager.CurrentState != ServerState.Stopped && !stoppingToken.IsCancellationRequested)
         {
-            _logger.LogInformation("Hold CTRL + X to exit gracefully.");
-            _logger.LogInformation("Hold CTRL + B to force a backup, CTRL + N to cancel a backup.");
+            _logger.LogInformation(KeyboardShortcutCtrlX);
+            _logger.LogInformation(KeyboardShortcutCtrlBCtrlN);
         }
 
         while (_serverManager.CurrentState != ServerState.Stopped && !stoppingToken.IsCancellationRequested)
@@ -54,12 +54,18 @@ internal class KeyboardWatcherService: Microsoft.Extensions.Hosting.BackgroundSe
             }
             catch (InvalidOperationException ex)
             {
-                _logger.LogTrace(ex, "Input wait was interupted.");
+                _logger.LogTrace(ex, KeyboardInputInterupted);
             }
 
             Thread.MemoryBarrier();
         }
 
         await _host.StopAsync(CancellationToken.None);
+    }
+
+    public override void Dispose()
+    {
+        GC.SuppressFinalize(this);
+        base.Dispose();
     }
 }

@@ -28,8 +28,8 @@ class Program
             return;
         }
 
-        logger.LogInformation("Minecraft Bedrock Service Manager v{version}", typeof(Program).Assembly.GetName().Version);
-        logger.LogInformation("Creating service wrapper...");
+        logger.LogInformation(ApplicationTitle, typeof(Program).Assembly.GetName().Version);
+        logger.LogInformation(CreatingServiceWrapper);
 
         if (WindowsServiceHelpers.IsWindowsService())
         {
@@ -37,16 +37,16 @@ class Program
             Debugger.Break();
 #endif
 
-            logger.LogInformation("Starting wrapper in {modeType} mode.", "service");
+            logger.LogInformation(StartingWrapper, WrapperTypeService);
         }
         else
         {
-            logger.LogInformation("Starting wrapper in {modeType} mode.", "console");
+            logger.LogInformation(StartingWrapper, WrapperTypeConsole);
         }
 
         await host.StartAsync();
         await host.WaitForShutdownAsync();
-        logger.LogInformation("Shutting down.");
+        logger.LogInformation(ShuttingDown);
     }
 
     private static IHost ConfigureHost(string[] args)
@@ -64,6 +64,7 @@ class Program
 
                             if (Debugger.IsAttached)
                             {
+                                loggerConfiguration.MinimumLevel.Verbose();
                                 loggerConfiguration.WriteTo.Debug();
                             }
 

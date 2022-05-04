@@ -1,15 +1,12 @@
 ﻿using Microsoft.Extensions.Logging;
-using System.Text.RegularExpressions;
+using MinecraftBedrockService;
 
 namespace System.Diagnostics;
 
 internal static class DataReceivedEventArgsExtensions
 {
-    private static readonly Regex MessageMatch = new("^(NO LOG FILE! - )?\\[.* ?[A-Za-z]+\\] ");
-    private static readonly Regex LogLevelMatch = new("^(?:NO LOG FILE! - )?\\[(?:.* )?([A-Za-z]+)\\] ");
-
     public static string? GetMessage(this DataReceivedEventArgs args)
-        => args.Data == null ? null : MessageMatch.Replace(args.Data, "");
+        => args.Data == null ? null : ServerResources.MessageMatch.Replace(args.Data, "");
 
     public static LogLevel GetLogLevel(this DataReceivedEventArgs args)
     {
@@ -18,7 +15,7 @@ internal static class DataReceivedEventArgsExtensions
             return LogLevel.None;
         }
 
-        var logLevelMatch = LogLevelMatch.Match(args.Data);
+        var logLevelMatch = ServerResources.LogLevelMatch.Match(args.Data);
         if (logLevelMatch.Success)
         {
             switch (logLevelMatch.Groups[1].Value.ToUpperInvariant())

@@ -6,3 +6,5 @@ global using MinecraftBedrockService.Configuration;
 global using MinecraftBedrockService.Enumerables;
 global using MinecraftBedrockService.Helpers;
 global using MinecraftBedrockService.Interfaces;
+
+global using static MinecraftBedrockService.ServiceResources;

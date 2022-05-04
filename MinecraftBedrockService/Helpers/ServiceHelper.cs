@@ -28,10 +28,10 @@ internal class ServiceHelper
         _serverConfig = serverConfig;
         _logger = logger;
 
-        _filename = Assembly.GetEntryAssembly()?.Location ?? throw new NotSupportedException("Current Assembly has no entry point.");
+        _filename = Assembly.GetEntryAssembly()?.Location ?? throw new NotSupportedException(ServiceErrorNoEntryPoint);
         _serverDefaults = new ServerConfig()
         {
-            WorkingDirectory = Path.GetDirectoryName(_filename) ?? throw new NotSupportedException("Could not find assembly directory.")
+            WorkingDirectory = Path.GetDirectoryName(_filename) ?? throw new NotSupportedException(ServiceErrorNoDirectory)
         };
     }
 
@@ -73,8 +73,8 @@ internal class ServiceHelper
 
                 var processInfo = new ProcessStartInfo
                 {
-                    FileName = "c:\\windows\\system32\\sc.exe",
-                    Arguments = $@"create ""{_serviceConfig.Value.ServiceName}"" binPath= ""{binPath}"" type= own start= delayed-auto DisplayName= ""{_serviceConfig.Value.Description}"" depend= ""Tcpip/Dhcp/Dnscache"" obj= ""{_serviceConfig.Value.RunAs}""",
+                    FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),  ServiceManagerExecutable),
+                    Arguments = string.Format(ServiceManagerArguments, _serviceConfig.Value.ServiceName, binPath, _serviceConfig.Value.Description, _serviceConfig.Value.RunAs),
                     CreateNoWindow = false,
                     UseShellExecute = true
                 };
@@ -92,7 +92,7 @@ internal class ServiceHelper
 
                     if (process == null)
                     {
-                        _logger.LogCritical("Unable to start the sc.exe process.");
+                        _logger.LogCritical(ServiceErrorServiceManagerFailed);
                         return;
                     }
 
@@ -101,15 +101,15 @@ internal class ServiceHelper
                     switch (process.ExitCode)
                     {
                         case 0:
-                            _logger.LogInformation("Created service with name {serviceName}", _serviceConfig.Value.ServiceName);
+                            _logger.LogInformation(ServiceCreated, _serviceConfig.Value.ServiceName);
                             return;
 
                         case 1073:
-                            _logger.LogError("Service {serviceName} already exists.", _serviceConfig.Value.ServiceName);
+                            _logger.LogError(ServiceAlreadyExists, _serviceConfig.Value.ServiceName);
                             return;
 
                         default:
-                            _logger.LogError("Unknown exit code: {exitCode}", process.ExitCode);
+                            _logger.LogError(ServiceUnknownExitCode, process.ExitCode);
                             return;
                     }
                 }
@@ -118,17 +118,17 @@ internal class ServiceHelper
                     switch (ex.ErrorCode)
                     {
                         case -2147467259:
-                            _logger.LogWarning("UAC dialog was cancelled.");
+                            _logger.LogWarning(ServiceErrorUACAbort);
                             return;
 
                         default:
-                            _logger.LogError("Unexpected error: {message}", ex.Message);
+                            _logger.LogError(ServiceUnknownError, ex.Message);
                             return;
                     }
                 }
 
             default:
-                _logger.LogError("Cannot install service on {platform} platform.", Platform);
+                _logger.LogError(ServicePlatformNotSupported, Platform);
                 return;
         }            
     }

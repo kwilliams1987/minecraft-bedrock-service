@@ -8,45 +8,50 @@ using System.Linq;
 
 namespace MinecraftBedrockService;
 
-internal class ServerManager : IServerManager
+internal class ServerManager : IServerManager, IObserver<ConfigurationFileType>, IObserver<ServerState>, IDisposable
 {
-    private class ServerManagerObserver: IDisposable
+    private readonly List<IObserver<string>> _logObservers = new();
+    private readonly List<IObserver<ServerState>> _stateObservers = new();
+    private readonly IOptions<ServerConfig> _configuration;
+    private readonly IFileProvider _workingDirectory;
+    private readonly IDisposable? _configurationWatcher;
+    private readonly IDisposable? _stateWatcher;
+    private readonly ILogger _logger;
+
+    private Process? serverProcess;
+    private Version? version;
+    private int playerCount = 0;
+    private ServerState serverState = ServerState.Created;
+
+    public ServerState CurrentState
     {
-        private readonly List<IObserver<string>> _observers;
-        private readonly IObserver<string> _observer;
-
-        public ServerManagerObserver(List<IObserver<string>> observers, IObserver<string> observer)
+        get => serverState;
+        private set
         {
-            _observers = observers ?? throw new ArgumentNullException(nameof(observers));
-            _observer = observer ?? throw new ArgumentNullException(nameof(observer));
-
-            _observers.Add(observer);
-        }
-
-        public void Dispose()
-        {
-            if (_observer != null && _observers.Contains(_observer))
+            if (value != serverState)
             {
-                _observers.Remove(_observer);
+                serverState = value;
+                _stateObservers.OnNext(CurrentState);
             }
         }
     }
 
-    private readonly List<IObserver<string>> _observers = new();
-    private readonly IOptions<ServerConfig> _configuration;
-    private readonly IFileProvider _workingDirectory;
-    private readonly ILogger _logger;
-
-    private Process? serverProcess;
-    private int playerCount = 0;
-
-    public ServerState CurrentState { get; private set; } = ServerState.Created;
-
-    public ServerManager(IOptions<ServerConfig> configuration, IFileProvider workingDirectory, ILogger<ServerManager> logger)
+    public ServerManager(IOptions<ServerConfig> configuration, IFileProvider workingDirectory, IConfigurationWatcher configurationWatcher, ILogger<ServerManager> logger)
     {
         _configuration = configuration;
         _workingDirectory = workingDirectory;
         _logger = logger;
+
+        _configurationWatcher = configurationWatcher.Subscribe(this);
+        _stateWatcher = Subscribe(this);
+    }
+
+    public void Dispose()
+    {
+        _configurationWatcher?.Dispose();
+        _stateWatcher?.Dispose();
+
+        GC.SuppressFinalize(this);
     }
 
     public async Task SendServerCommandAsync(string command)
@@ -55,17 +60,17 @@ internal class ServerManager : IServerManager
         {
             if (CurrentState == ServerState.Running)
             {
-                _logger.LogTrace("Sending {command} command to server.", command);
+                _logger.LogTrace(ServerSendingCommand, command);
                 await serverProcess!.StandardInput.WriteLineAsync(command);
             }
             else
             {
-                _logger.LogError("Attempted to send {command} to server but process is not running.", command);
+                _logger.LogError(ServerSendCommandFailedNotRunning, command);
             }
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogError(ex, "Error when sending {command} to the server.", command);
+            _logger.LogError(ex, ServerSendCommandFailed, command);
         }
     }
 
@@ -73,7 +78,7 @@ internal class ServerManager : IServerManager
     {
         if (CurrentState == ServerState.Starting || CurrentState == ServerState.Running)
         {
-            _logger.LogWarning("Attempted to start server when it is already running.");
+            _logger.LogWarning(ServerCannotStartWhenRunning);
             return Task.FromResult(true);
         }
 
@@ -98,7 +103,7 @@ internal class ServerManager : IServerManager
 
         if (serverProcess != null)
         {
-            _logger.LogError("A server process with ID {processId} was already found for this instance. The server manager cannot continue.", serverProcess.Id);
+            _logger.LogError(ServerProcessAlreadyExists, serverProcess.Id);
 
             serverProcess = null;
 
@@ -131,10 +136,10 @@ internal class ServerManager : IServerManager
 
                 serverProcess.OutputDataReceived += ServerProcess_OutputDataReceived;
                 serverProcess.ErrorDataReceived += ServerProcess_ErrorDataReceived;
-                _logger.LogInformation("Starting {path}.", serverExecutable.PhysicalPath);
+                _logger.LogInformation(ServerStartingExecutable, serverExecutable.PhysicalPath);
                 serverProcess.Start();
 
-                _logger.LogInformation("Hooking console output for Process ID {processId}.", serverProcess.Id);
+                _logger.LogInformation(ServerHookingProcessOutput, serverProcess.Id);
                 serverProcess.BeginOutputReadLine();
                 serverProcess.BeginErrorReadLine();
 
@@ -142,13 +147,9 @@ internal class ServerManager : IServerManager
                 {
                     await (serverProcess?.WaitForExitAsync().ConfigureAwait(false) ?? Task.CompletedTask.ConfigureAwait(false));
 
-                    if (CurrentState == ServerState.Stopping)
+                    if (CurrentState != ServerState.Stopping && CurrentState != ServerState.Stopped)
                     {
-                        CurrentState = ServerState.Stopped;
-                    } 
-                    else 
-                    {
-                        _logger.LogError("Server exited unexpectly, restarting.");
+                        _logger.LogError(ServerExitedUnexpectedly);
                         CurrentState = ServerState.Faulted;
 
                         serverProcess?.Dispose();
@@ -156,14 +157,13 @@ internal class ServerManager : IServerManager
 
                         await StartServerAsync().ConfigureAwait(false);
                     }
-                }).ContinueWith(t => _logger.LogCritical(t.Exception, "Unhandled exception in Server Heartbeat."), TaskContinuationOptions.OnlyOnFaulted);
-
-                CurrentState = ServerState.Running;
+                }).ContinueWith(t => _logger.LogCritical(t.Exception, ExceptionUnhandled, "Server Heartbeat"), TaskContinuationOptions.OnlyOnFaulted);
+                
                 return Task.FromResult(true);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to start the server.");
+                _logger.LogError(ex, ServerStartFailed);
                 serverProcess?.Kill();
 
                 CurrentState = ServerState.Faulted;
@@ -172,7 +172,7 @@ internal class ServerManager : IServerManager
         }
         else
         {
-            _logger.LogError("Could not find the {path} executable in working directory {directory}.", _configuration.Value.Executable, _configuration.Value.WorkingDirectory);
+            _logger.LogError(ServerExecutableMissing, _configuration.Value.Executable, _configuration.Value.WorkingDirectory);
 
             CurrentState = ServerState.Faulted;
             return Task.FromResult(false);
@@ -181,81 +181,99 @@ internal class ServerManager : IServerManager
 
     public async Task<bool> StopServerAsync(TimeSpan? maxWaitTime = null)
     {
-        CurrentState = ServerState.Stopping;
-
+        var success = false;
         try
         {
-            if (CurrentState == ServerState.Running)
+            if (CurrentState == ServerState.Running && serverProcess != null)
             {
-                await SendServerCommandAsync("stop").ConfigureAwait(false);
+                CurrentState = ServerState.Stopping;
+                await SendServerCommandAsync(ServerCommands.StopServer).ConfigureAwait(false);
 
                 if (maxWaitTime == null)
                 {
-                    await serverProcess!.WaitForExitAsync().ConfigureAwait(false);
+                    await serverProcess.WaitForExitAsync().ConfigureAwait(false);
                 }
                 else
                 {
                     var source = new CancellationTokenSource(maxWaitTime.Value);
-                    await serverProcess!.WaitForExitAsync(source.Token).ConfigureAwait(false);
+                    await serverProcess.WaitForExitAsync(source.Token).ConfigureAwait(false);
                 }
             }
 
-            CurrentState = ServerState.Stopped;
-            return true;
+            success = true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to stop server gracefully, forcing exit.");
+            _logger.LogError(ex, ServerTerminatingProcess);
             serverProcess?.Kill();
-
-            CurrentState = ServerState.Faulted;
-            return false;
+            success = false;
         }
         finally
         {
-            Interlocked.Exchange(ref playerCount, 0);
-            serverProcess?.Dispose();
-            serverProcess = null;
+            if (success)
+            {
+                Interlocked.Exchange(ref playerCount, 0);
+                serverProcess?.Dispose();
+                serverProcess = null;
+            }
+
+            CurrentState = success ? ServerState.Stopped : ServerState.Faulted;
         }
+
+        return success;
     }
 
     public Task<int> GetPlayerCountAsync() => Task.FromResult(playerCount);
 
+    public Task<Version> GetServerVersionAsync() => Task.FromResult(version ?? new Version(0, 0, 0, 0));
+
+    public IDisposable Subscribe(IObserver<string> observer) => new Observer<string>(_logObservers, observer);
+    public IDisposable Subscribe(IObserver<ServerState> observer) => new Observer<ServerState>(_stateObservers, observer);
+
+    public Task SendServerMessageAsync(string message, params object[] args) => SendServerCommandAsync(string.Format(ServerCommands.SendMessage, string.Format(message, args)));
+    
     private void ServerProcess_OutputDataReceived(object sender, DataReceivedEventArgs e)
     {
         var message = e.GetMessage();
 
         if (!string.IsNullOrWhiteSpace(message))
         {
-            if (message == "NO LOG FILE! - [] setting up server logging...")
+            if (message == ServerResources.LogFileNoLogFileDetected)
             {
                 // Ignored because logging is handled by this process.
                 return;
             }
-            
-            else if (message.Contains("Player connected: "))
+
+            else if (message.Contains(ServerResources.LogFilePlayerConnected))
             {
                 Interlocked.Increment(ref playerCount);
-                _logger.LogInformation("{message} ({playerCount} players online)", message, playerCount);
+                _logger.LogInformation(ServerPlayerCountUpdated, message, playerCount);
             }
 
-            else if (message.Contains("Player disconnected: "))
+            else if (message.Contains(ServerResources.LogFilePlayerDisconnected))
             {
                 Interlocked.Decrement(ref playerCount);
-                _logger.LogInformation("{message} ({playerCount} players online)", message, playerCount);
+                _logger.LogInformation(ServerPlayerCountUpdated, message, playerCount);
             }
 
-            else if (message.EndsWith("Server started."))
+            else if (message.EndsWith(ServerResources.LogFileServerStarted))
             {
-                _logger.LogTrace("{message}", message);
+                CurrentState = ServerState.Running;
+                _logger.LogTrace(ServerMessagePassthrough, message);
+            }
+
+            else if (message.StartsWith(ServerResources.LogFileVersionNumber))
+            {
+                version = new Version(message[8..]);
+                _logger.LogInformation(ServerMessagePassthrough, message);
             }
 
             else
             {
-                _logger.Log(e.GetLogLevel(), "{message}", message);
+                _logger.Log(e.GetLogLevel(), ServerMessagePassthrough, message);
             }
 
-            OnMessage(message);
+            _logObservers.OnNext(message);
         }
     }
 
@@ -265,29 +283,49 @@ internal class ServerManager : IServerManager
 
         if (!string.IsNullOrWhiteSpace(message))
         {
-            _logger.LogCritical("{message}", message);
+            _logger.LogCritical(ServerMessagePassthrough, message);
         }
     }
 
-    public IDisposable Subscribe(IObserver<string> observer) => new ServerManagerObserver(_observers, observer);
-
-    private void OnMessage(string message)
+    async void IObserver<ConfigurationFileType>.OnNext(ConfigurationFileType value)
     {
-        if (string.IsNullOrEmpty(message))
+        switch (value)
         {
-            var error = new ArgumentNullException(nameof(message));
+            case ConfigurationFileType.Whitelist:
+                _logger.LogInformation(ServerReloadingFile, value);
+                await SendServerCommandAsync(ServerCommands.ReloadWhitelist);
+                break;
 
-            foreach (var observer in _observers.ToArray())
-            {
-                observer.OnError(error);
-            }
+            case ConfigurationFileType.Permissions:
+                _logger.LogInformation(ServerReloadingFile, value);
+                await SendServerCommandAsync(ServerCommands.ReloadPermissions);
+                break;
+
+            case ConfigurationFileType.ServerProperties:
+                _logger.LogInformation(ServerPropertiesChanged);
+
+                await this.SendTimedMessageAsync(ServerRestartTimer, TimeSpan.FromSeconds(30));
+                await SendServerMessageAsync(ServerRestartMessage);
+
+                await StopServerAsync();
+                await StartServerAsync();
+                break;
         }
-        else
-        {
-            foreach (var observer in _observers.ToArray())
-            {
-                observer.OnNext(message);
-            }
-        }
+    }
+
+    void IObserver<ConfigurationFileType>.OnCompleted() { }
+    void IObserver<ConfigurationFileType>.OnError(Exception error) 
+    {
+        _logger.LogError(error, ObservableTypeHandlerError, nameof(ConfigurationFileType));
+    }
+
+    void IObserver<ServerState>.OnNext(ServerState value)
+    {
+        _logger.LogInformation(ServerStateChanged, value);
+    }
+    void IObserver<ServerState>.OnCompleted() { }
+    void IObserver<ServerState>.OnError(Exception error)
+    {
+        _logger.LogError(error, ObservableTypeHandlerError, nameof(ServerState));
     }
 }

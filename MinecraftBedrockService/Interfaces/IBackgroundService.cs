@@ -1,9 +1,7 @@
-﻿namespace MinecraftBedrockService.Interfaces
+﻿using Microsoft.Extensions.Hosting;
+
+namespace MinecraftBedrockService.Interfaces;
+
+internal interface IBackgroundService: IHostedService
 {
-    internal interface IBackgroundService
-    {
-        void Start();
-        void Stop();
-        bool IsRunning { get; }
-    }
 }

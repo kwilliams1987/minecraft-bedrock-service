@@ -1,212 +1,224 @@
 ﻿using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using MinecraftBedrockService.Configuration;
-using MinecraftBedrockService.Interfaces;
-using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 
-namespace MinecraftBedrockService
+namespace MinecraftBedrockService;
+
+internal class BackupManager: IBackupManager
 {
-    internal class BackupManager: IBackupManager
+    private static readonly TimeSpan ProgressGateDelay = TimeSpan.FromMilliseconds(1500);
+
+    private readonly IOptions<ServerConfig> _configuration;
+    private readonly ILogger _logger;
+    private readonly IServerManager _serverManager;
+    private readonly IFileProvider _workingDirectory;
+    private readonly ManualResetEventSlim _backupGate = new(true);
+    
+    private CancellationTokenSource? backupCancellationToken;
+    private CancellationTokenSource? watcherCancellationToken;
+
+    public BackupManager(ILogger<BackupManager> logger, IServerManager serverManager, IFileProvider fileProvider, IOptions<ServerConfig> configuration)
     {
-        private static readonly TimeSpan ProgressGateDelay = TimeSpan.FromMilliseconds(1500);
+        _logger = logger;
+        _serverManager = serverManager;
+        _workingDirectory = fileProvider;
+        _configuration = configuration;
+    }
 
-        private readonly IOptions<ServerConfig> _configuration;
-        private readonly ILogger _logger;
-        private readonly IServerManager _serverManager;
-        private readonly IFileProvider _workingDirectory;
-        private readonly ManualResetEventSlim _backupGate = new(true);
-        
-        private CancellationTokenSource backupCancellationToken;
-        private CancellationTokenSource watcherCancellationToken;
+    public async Task<string> CreateBackupAsync()
+    {
+        var backupFiles = new Dictionary<string, int>();
+        var backupProgressGate = new ManualResetEventSlim();
+        var temporaryFolder = Path.Combine(Path.GetTempPath(), Path.GetTempFileName());
 
-        public BackupManager(ILogger<BackupManager> logger, IServerManager serverManager, IFileProvider fileProvider, IOptions<ServerConfig> configuration)
+        if (backupCancellationToken != null)
         {
-            _logger = logger;
-            _serverManager = serverManager;
-            _workingDirectory = fileProvider;
-            _configuration = configuration;
+            _logger.LogWarning("A backup is already in progress.");
+            return string.Empty;
         }
 
-        public async Task<string> CreateBackupAsync()
+        if (_serverManager.CurrentState != ServerState.Running)
         {
-            var backupFiles = new Dictionary<string, int>();
-            var backupProgressGate = new ManualResetEventSlim();
-            var temporaryFolder = Path.Combine(Path.GetTempPath(), Path.GetTempFileName());
+            _logger.LogError("The server is not running.");
+            return String.Empty;
+        }
 
-            if (backupCancellationToken != null)
+        try
+        {
+            backupCancellationToken = new CancellationTokenSource();
+            var backupDir = Path.Combine(_configuration.Value.WorkingDirectory, _configuration.Value.BackupDirectory);
+            Directory.CreateDirectory(backupDir);
+
+            // Block exit threads until backup is completed.
+            _backupGate.Reset();
+
+            if (Directory.Exists(temporaryFolder))
             {
-                _logger.LogWarning("A backup is already in progress.");
-                return string.Empty;
+                Directory.Delete(temporaryFolder, true);
             }
+
+            if (File.Exists(temporaryFolder))
+            {
+                File.Delete(temporaryFolder);
+            }
+
+            Directory.CreateDirectory(temporaryFolder);
+
+            _logger.LogInformation("Starting backup.");
+            var backupPath = $"{Path.Combine(_configuration.Value.WorkingDirectory, _configuration.Value.BackupDirectory, DateTime.Now.ToString("yyyy-MM-dd HH.mm.ss"))}.zip";
+
+            var subscription = _serverManager.Subscribe(new OutputObserver(async message =>
+            {
+                if (message.Contains("/db/MANIFEST") == true)
+                {
+                    backupProgressGate.Set();
+
+                    var files = message.Split(", ").Select(f => f.Split(':'));
+                    foreach (var file in files)
+                    {
+                        var newLength = int.Parse(file[1]);
+
+                        if (backupFiles.ContainsKey(file[0]))
+                        {
+                            if (backupFiles[file[0]] != newLength)
+                            {
+                                _logger.LogWarning("File {file} was already found in file collection with length of {oldLength}. Replacing with {newLength}.", file[0], backupFiles[file[0]], newLength);
+                                backupFiles[file[0]] = newLength;
+                            }
+                        }
+                        else
+                        {
+                            backupFiles.Add(file[0], newLength);
+                        }
+                    }
+
+                    backupProgressGate.Set();
+                }
+
+                if (message == "A previous save has not been completed.")
+                {
+                    await _serverManager.SendServerCommandAsync("save resume").ConfigureAwait(false);
+                    await _serverManager.SendServerCommandAsync("save hold").ConfigureAwait(false);
+                }
+            }));
 
             try
             {
-                backupCancellationToken = new CancellationTokenSource();
-                var backupDir = Path.Combine(_configuration.Value.WorkingDirectory, _configuration.Value.BackupDirectory);
-                Directory.CreateDirectory(backupDir);
+                backupFiles.Clear();
+                await _serverManager.SendServerCommandAsync("save hold");
 
-                // Block exit threads until backup is completed.
-                _backupGate.Reset();
-
-                if (Directory.Exists(temporaryFolder))
+                while (!backupProgressGate.IsSet && !backupCancellationToken.IsCancellationRequested)
                 {
-                    Directory.Delete(temporaryFolder, true);
+                    await Task.Delay(ProgressGateDelay, backupCancellationToken.Token);
+                    await _serverManager.SendServerCommandAsync("save query");
                 }
-
-                if (File.Exists(temporaryFolder))
-                {
-                    File.Delete(temporaryFolder);
-                }
-
-                Directory.CreateDirectory(temporaryFolder);
-
-                _logger.LogInformation("Starting backup.");
-                var backupPath = $"{Path.Combine(_configuration.Value.WorkingDirectory, _configuration.Value.BackupDirectory, DateTime.Now.ToString("yyyy-MM-dd HH.mm.ss"))}.zip";
-
-                var subscription = _serverManager.Subscribe(new OutputObserver(message =>
-                {
-                    if (message?.Contains("/db/MANIFEST") == true)
-                    {
-                        backupProgressGate.Set();
-
-                        var files = message?.Split(", ").Select(f => f.Split(':'));
-                        foreach (var file in files)
-                        {
-                            var newLength = int.Parse(file[1]);
-
-                            if (backupFiles.ContainsKey(file[0]))
-                            {
-                                if (backupFiles[file[0]] != newLength)
-                                {
-                                    _logger.LogWarning("File {file} was already found in file collection with length of {oldLength}. Replacing with {newLength}.", file[0], backupFiles[file[0]], newLength);
-                                    backupFiles[file[0]] = newLength;
-                                }
-                            }
-                            else
-                            {
-                                backupFiles.Add(file[0], newLength);
-                            }
-                        }
-
-                        backupProgressGate.Set();
-                    }
-                }));
-
-                try
-                {
-                    backupFiles.Clear();
-                    await _serverManager.SendServerCommandAsync("save hold");
-
-                    while (!backupProgressGate.IsSet && !backupCancellationToken.IsCancellationRequested)
-                    {
-                        await Task.Delay(ProgressGateDelay, backupCancellationToken.Token);
-                        await _serverManager.SendServerCommandAsync("save query");
-                    }
-                }
-                catch (OperationCanceledException) 
-                { 
-                    _logger.LogWarning("Backup was cancelled.");
-                    throw;
-                }
-                finally
-                {
-                    subscription.Dispose();
-                }
-
-                backupProgressGate.WaitOne();
-
-                foreach (var file in backupFiles)
-                {
-                    var source = Path.Combine(_configuration.Value.WorkingDirectory, "worlds", file.Key);
-                    var target = Path.Combine(temporaryFolder, file.Key);
-
-                    Directory.CreateDirectory(Path.GetDirectoryName(target));
-
-                    _logger.LogInformation("Creating shadow copy of {filename}.", file.Key);
-                    File.Copy(source, target);
-
-                    try
-                    {
-                        _logger.LogInformation("Truncating shadow copy to {length} bytes.", file.Value);
-
-                        var bytes = new byte[file.Value];
-                        using (var reader = File.OpenRead(target))
-                        {
-                            await reader.ReadAsync(bytes, backupCancellationToken.Token);
-                        }
-
-                        File.Delete(target);
-
-                        using var writer = File.OpenWrite(target);
-                        await writer.WriteAsync(bytes, backupCancellationToken.Token);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        _logger.LogWarning("Backup was cancelled.");
-
-                        throw;
-                    }
-                }
-
-                ZipFile.CreateFromDirectory(temporaryFolder, backupPath);
-                _logger.LogInformation("Backup completed: {path}.", backupPath);
-
-                return backupPath;
+            }
+            catch (OperationCanceledException) 
+            { 
+                _logger.LogWarning("Backup was cancelled.");
+                throw;
             }
             finally
             {
-                await _serverManager.SendServerCommandAsync("save resume").ConfigureAwait(false);
-                Directory.Delete(temporaryFolder, true);
-                _backupGate.Set();
-                backupCancellationToken = null;
+                subscription.Dispose();
             }
+
+            backupProgressGate.WaitOne();
+
+            foreach (var file in backupFiles)
+            {
+                var source = Path.Combine(_configuration.Value.WorkingDirectory, "worlds", file.Key);
+                var target = Path.Combine(temporaryFolder, file.Key);
+
+                Directory.CreateDirectory(Path.GetDirectoryName(target) ?? throw new NotSupportedException("Unable to create temporary directory."));
+
+                _logger.LogInformation("Creating shadow copy of {filename}.", file.Key);
+                File.Copy(source, target);
+
+                try
+                {
+                    _logger.LogInformation("Truncating shadow copy to {length} bytes.", file.Value);
+
+                    var bytes = new byte[file.Value];
+                    using (var reader = File.OpenRead(target))
+                    {
+                        await reader.ReadAsync(bytes, backupCancellationToken.Token);
+                    }
+
+                    File.Delete(target);
+
+                    using var writer = File.OpenWrite(target);
+                    await writer.WriteAsync(bytes, backupCancellationToken.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger.LogWarning("Backup was cancelled.");
+
+                    throw;
+                }
+            }
+
+            ZipFile.CreateFromDirectory(temporaryFolder, backupPath);
+            _logger.LogInformation("Backup completed: {path}.", backupPath);
+
+            return backupPath;
+        }
+        finally
+        {
+            await _serverManager.SendServerCommandAsync("save resume").ConfigureAwait(false);
+            Directory.Delete(temporaryFolder, true);
+            _backupGate.Set();
+            backupCancellationToken = null;
+        }
+    }
+
+    public Task CancelBackupAsync()
+    {
+        backupCancellationToken?.Cancel();
+        return Task.CompletedTask;
+    }
+
+    public async Task StartWatchingAsync()
+    {
+        watcherCancellationToken = new();
+
+        var backups = _workingDirectory.GetDirectoryContents(_configuration.Value.BackupDirectory);
+        var mostRecent = backups.Where(f => !f.IsDirectory && Path.GetExtension(f.Name).ToLowerInvariant() == ".zip")
+                            .OrderByDescending(f => f.LastModified)
+                            .Select(f => f.LastModified)
+                            .FirstOrDefault();
+
+        if (mostRecent == default)
+        {
+            _logger.LogInformation("Creating initial backup.");
+            await CreateBackupAsync();
+            mostRecent = DateTimeOffset.Now;
         }
 
-        public Task CancelBackupAsync()
+        var timeSinceLastBackup = DateTimeOffset.Now - mostRecent;
+        if (timeSinceLastBackup > _configuration.Value.BackupInterval)
         {
-            backupCancellationToken?.Cancel();
-            return Task.CompletedTask;
+            _logger.LogInformation("Creating new backup.");
+            await CreateBackupAsync();
         }
 
-        public async Task StartWatchingAsync()
+        _ = Task.Run(async () =>
         {
-            watcherCancellationToken = new();
-
-            var backups = _workingDirectory.GetDirectoryContents(_configuration.Value.BackupDirectory);
-            var mostRecent = backups.Where(f => !f.IsDirectory && Path.GetExtension(f.Name).ToLowerInvariant() == ".zip")
-                                .OrderByDescending(f => f.LastModified)
-                                .Select(f => f.LastModified)
-                                .FirstOrDefault();
-
-            if (mostRecent == default)
-            {
-                _logger.LogInformation("Creating initial backup.");
-                await CreateBackupAsync();
-                mostRecent = DateTimeOffset.Now;
-            }
-
-            var timeSinceLastBackup = DateTimeOffset.Now - mostRecent;
-            if (timeSinceLastBackup > _configuration.Value.BackupInterval)
-            {
-                _logger.LogInformation("Creating new backup.");
-                await CreateBackupAsync();
-            }
-
             while (backupCancellationToken == null || !watcherCancellationToken.IsCancellationRequested)
             {
                 try
                 {
                     await Task.Delay(_configuration.Value.BackupInterval, watcherCancellationToken.Token);
 
-                    _logger.LogInformation("Creating new backup.");
-                    await CreateBackupAsync();
+                    if (!watcherCancellationToken.IsCancellationRequested)
+                    {
+                        _logger.LogInformation("Creating new backup.");
+                        await CreateBackupAsync();
+                    }
                 }
                 catch (TaskCanceledException)
                 {
@@ -218,14 +230,14 @@ namespace MinecraftBedrockService
                     _logger.LogCritical(ex, "The backup failed.");
                 }
             }
-        }
+        }).ContinueWith(t => _logger.LogCritical(t.Exception, "Unhandled exception in Backup Watcher."), TaskContinuationOptions.OnlyOnFaulted);
+    }
 
-        public Task StopWatchingAsync()
-        {
-            watcherCancellationToken?.Cancel();
-            _backupGate?.Wait();
+    public Task StopWatchingAsync()
+    {
+        watcherCancellationToken?.Cancel();
+        _backupGate?.Wait();
 
-            return Task.CompletedTask;
-        }
+        return Task.CompletedTask;
     }
 }

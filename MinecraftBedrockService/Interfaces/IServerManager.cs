@@ -1,15 +1,11 @@
-﻿using System;
-using System.Threading.Tasks;
+﻿namespace MinecraftBedrockService.Interfaces;
 
-namespace MinecraftBedrockService.Interfaces
+public interface IServerManager: IObservable<string>
 {
-    public interface IServerManager: IObservable<string>
-    {
-        public bool ExitRequested { get; }
+    public ServerState CurrentState { get; }
 
-        public Task<bool> StartServerAsync();
-        public Task<bool> StopServerAsync(TimeSpan? maxWaitTime = null);
-        public Task SendServerCommandAsync(string command);
-        public Task<int> GetPlayerCountAsync();
-    }
+    public Task<bool> StartServerAsync();
+    public Task<bool> StopServerAsync(TimeSpan? maxWaitTime = null);
+    public Task SendServerCommandAsync(string command);
+    public Task<int> GetPlayerCountAsync();
 }

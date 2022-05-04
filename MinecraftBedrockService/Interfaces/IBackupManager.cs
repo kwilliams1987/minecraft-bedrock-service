@@ -1,13 +1,9 @@
-﻿using System.Threading;
-using System.Threading.Tasks;
+﻿namespace MinecraftBedrockService.Interfaces;
 
-namespace MinecraftBedrockService.Interfaces
+public interface IBackupManager
 {
-    public interface IBackupManager
-    {
-        Task<string> CreateBackupAsync();
-        Task CancelBackupAsync();
-        Task StartWatchingAsync();
-        Task StopWatchingAsync();
-    }
+    Task<string> CreateBackupAsync();
+    Task CancelBackupAsync();
+    Task StartWatchingAsync();
+    Task StopWatchingAsync();
 }

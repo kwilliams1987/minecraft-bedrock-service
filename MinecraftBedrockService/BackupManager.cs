@@ -10,6 +10,39 @@ namespace MinecraftBedrockService;
 
 internal class BackupManager: IBackupManager
 {
+    private class ServerStateWaiter : IObserver<ServerState>, IDisposable
+    {
+        private readonly ServerState _undesiredState;
+        private readonly IDisposable _watcher;
+        private readonly ManualResetEvent _waiter;
+
+        public ServerStateWaiter(IObservable<ServerState> observable, ServerState undesiredState)
+        {
+            _undesiredState = undesiredState;
+            _watcher = observable.Subscribe(this);
+            _waiter = new ManualResetEvent(false);
+        }
+
+        public void Dispose()
+        {
+            _watcher?.Dispose();
+        }
+
+        public void WaitOne() => _waiter.WaitOne();
+
+        void IObserver<ServerState>.OnCompleted() { }
+
+        void IObserver<ServerState>.OnError(Exception error) { }
+
+        void IObserver<ServerState>.OnNext(ServerState value)
+        {
+            if (value != _undesiredState)
+            {
+                _waiter.Set();
+            }
+        }
+    }
+
     private static readonly TimeSpan ProgressGateDelay = TimeSpan.FromMilliseconds(1500);
 
     private readonly IOptions<ServerConfig> _configuration;
@@ -39,6 +72,13 @@ internal class BackupManager: IBackupManager
         {
             _logger.LogWarning(BackupAlreadyInProgress);
             return string.Empty;
+        }
+
+        if (_serverManager.CurrentState == ServerState.Starting)
+        {
+            _logger.LogInformation(BackupWaitingForServerStart);
+            using var waiter = new ServerStateWaiter(_serverManager, ServerState.Starting);
+            waiter.WaitOne();
         }
 
         if (_serverManager.CurrentState != ServerState.Running)

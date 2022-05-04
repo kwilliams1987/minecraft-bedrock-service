@@ -42,6 +42,7 @@ internal static class ServiceResources
 
     public const string BackupManagerStarting = "Starting backup manager.";
     public const string BackupAlreadyInProgress = "A backup is already in progress.";
+    public const string BackupWaitingForServerStart = "Waiting for server to start.";
     public const string BackupWhenServerNotRunning = "Cannot start backup, the server is not running.";
     public const string BackupStarted = "Starting backup.";
     public const string BackupDuplicateFileFound = "File {file} was already found in file collection with length of {oldLength}. Replacing with {newLength}.";

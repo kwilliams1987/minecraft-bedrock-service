@@ -258,8 +258,8 @@ internal class ServerManager : IServerManager, IObserver<ConfigurationFileType>,
 
             else if (message.EndsWith(ServerResources.LogFileServerStarted))
             {
-                CurrentState = ServerState.Running;
                 _logger.LogTrace(ServerMessagePassthrough, message);
+                CurrentState = ServerState.Running;
             }
 
             else if (message.StartsWith(ServerResources.LogFileVersionNumber))
